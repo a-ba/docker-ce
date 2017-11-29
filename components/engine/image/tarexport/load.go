@@ -27,7 +27,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool) error {
+func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool, printExcludes bool) error {
+
+	if printExcludes {
+		quiet = true
+	}
+
 	var progressOutput progress.Output
 	if !quiet {
 		progressOutput = streamformatter.NewJSONProgressOutput(outStream, false)
@@ -51,6 +56,9 @@ func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool)
 	manifestFile, err := os.Open(manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if printExcludes {
+				return fmt.Errorf("--print-excludes not supported with legacy archives")
+			}
 			return l.legacyLoad(tmpDir, outStream, progressOutput)
 		}
 		return err
@@ -61,6 +69,8 @@ func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool)
 	if err := json.NewDecoder(manifestFile).Decode(&manifest); err != nil {
 		return err
 	}
+
+	haveLayer := make(map[string]struct{})
 
 	var parentLinks []parentLink
 	var imageIDsStr string
@@ -99,6 +109,21 @@ func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool)
 			if (platform != "windows") && (platform != "linux") {
 				return fmt.Errorf("configuration for this image has an unsupported platform: %s", platform)
 			}
+		}
+
+		if printExcludes {
+			// output the ChainID of the images we already have
+			for _, diffID := range img.RootFS.DiffIDs {
+				r := rootFS
+				r.Append(diffID)
+				chainID := r.ChainID()
+				_, err := l.ls.Get(chainID)
+				if err == nil {
+					haveLayer[chainID.String()] = struct{}{}
+				}
+				rootFS.Append(diffID)
+			}
+			continue
 		}
 
 		for i, diffID := range img.RootFS.DiffIDs {
@@ -157,6 +182,10 @@ func (l *tarexporter) Load(inTar io.ReadCloser, outStream io.Writer, quiet bool)
 
 	if imageRefCount == 0 {
 		outStream.Write([]byte(imageIDsStr))
+	}
+
+	for chainID := range haveLayer {
+		fmt.Fprintf(outStream, "%s\n", chainID)
 	}
 
 	return nil

@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/docker/distribution"
@@ -33,9 +35,10 @@ type saveSession struct {
 	images      map[image.ID]*imageDescriptor
 	savedLayers map[string]struct{}
 	diffIDPaths map[layer.DiffID]string // cache every diffID blob to avoid duplicates
+	excludedLayers map[string]bool
 }
 
-func (l *tarexporter) Save(names []string, outStream io.Writer) error {
+func (l *tarexporter) Save(names []string, outStream io.Writer, exclude []string) error {
 	images, err := l.parseNames(names)
 	if err != nil {
 		return err
@@ -43,7 +46,18 @@ func (l *tarexporter) Save(names []string, outStream io.Writer) error {
 
 	// Release all the image top layer references
 	defer l.releaseLayerReferences(images)
-	return (&saveSession{tarexporter: l, images: images}).save(outStream)
+
+	regExclude := regexp.MustCompile(`\A(?:all|(?:sha256:)?[0-9a-fA-F]{64})\z`)
+	excludedLayers := make(map[string]bool)
+	for _, layer := range exclude {
+		if regExclude.MatchString(layer) {
+			excludedLayers[strings.ToLower(layer)] = true;
+		} else {
+			return fmt.Errorf("invalid exclude string: %#v (must be a valid layer id or 'all')", layer)
+		}
+	}
+
+	return (&saveSession{tarexporter: l, images: images, excludedLayers:excludedLayers}).save(outStream)
 }
 
 // parseNames will parse the image names to a map which contains image.ID to *imageDescriptor.
@@ -332,6 +346,11 @@ func (s *saveSession) saveImage(id image.ID) (map[layer.DiffID]distribution.Desc
 
 func (s *saveSession) saveLayer(id layer.ChainID, legacyImg image.V1Image, createdTime time.Time) (distribution.Descriptor, error) {
 	if _, exists := s.savedLayers[legacyImg.ID]; exists {
+		return distribution.Descriptor{}, nil
+	}
+
+	// break if the client excluded this layer
+	if s.excludedLayers["all"] || s.excludedLayers[id.String()] || s.excludedLayers[legacyImg.ID] {
 		return distribution.Descriptor{}, nil
 	}
 

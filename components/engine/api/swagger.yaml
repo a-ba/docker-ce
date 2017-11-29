@@ -7083,6 +7083,12 @@ paths:
           description: "Image name or ID"
           type: "string"
           required: true
+        - name: "exclude"
+          in: "query"
+          description: "Layers not to be included in the archive (or 'all' to exclude all layers, thus save only the metadata)"
+          type: "array"
+          items:
+            type: "string"
       tags: ["Image"]
   /images/get:
     get:
@@ -7110,6 +7116,12 @@ paths:
         - name: "names"
           in: "query"
           description: "Image names to filter by"
+          type: "array"
+          items:
+            type: "string"
+        - name: "exclude"
+          in: "query"
+          description: "Layers not to be included in the archive (or 'all' to exclude all layers, thus save only the metadata)"
           type: "array"
           items:
             type: "string"
@@ -7143,6 +7155,11 @@ paths:
         - name: "quiet"
           in: "query"
           description: "Suppress progress details during load."
+          type: "boolean"
+          default: false
+        - name: "printExcludes"
+          in: "query"
+          description: "Do not import anything, but display the list of layers already present on this daemon (to be fed to 'docker save --exclude')"
           type: "boolean"
           default: false
       tags: ["Image"]

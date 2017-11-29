@@ -16,6 +16,7 @@ import (
 type loadOptions struct {
 	input string
 	quiet bool
+	printExcludes bool
 }
 
 // NewLoadCommand creates a new `docker load` command
@@ -35,6 +36,7 @@ func NewLoadCommand(dockerCli command.Cli) *cobra.Command {
 
 	flags.StringVarP(&opts.input, "input", "i", "", "Read from tar archive file, instead of STDIN")
 	flags.BoolVarP(&opts.quiet, "quiet", "q", false, "Suppress the load output")
+	flags.BoolVar(&opts.printExcludes, "print-excludes", false, "Do not import anything, but display the list of layers already present on this daemon (to be fed to 'docker save --exclude')")
 
 	return cmd
 }
@@ -62,7 +64,7 @@ func runLoad(dockerCli command.Cli, opts loadOptions) error {
 	if !dockerCli.Out().IsTerminal() {
 		opts.quiet = true
 	}
-	response, err := dockerCli.Client().ImageLoad(context.Background(), input, opts.quiet)
+	response, err := dockerCli.Client().ImageLoad(context.Background(), input, opts.quiet, opts.printExcludes)
 	if err != nil {
 		return err
 	}

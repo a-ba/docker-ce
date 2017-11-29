@@ -15,6 +15,7 @@ import (
 type saveOptions struct {
 	images []string
 	output string
+	exclude []string
 }
 
 // NewSaveCommand creates a new `docker save` command
@@ -34,6 +35,7 @@ func NewSaveCommand(dockerCli command.Cli) *cobra.Command {
 	flags := cmd.Flags()
 
 	flags.StringVarP(&opts.output, "output", "o", "", "Write to a file, instead of STDOUT")
+	flags.StringSliceVarP(&opts.exclude, "exclude", "e", []string{}, "Layers not to be included in the archive (or 'all' to exclude all layers, thus save only the metadata)")
 
 	return cmd
 }
@@ -47,7 +49,7 @@ func runSave(dockerCli command.Cli, opts saveOptions) error {
 		return errors.Wrap(err, "failed to save image")
 	}
 
-	responseBody, err := dockerCli.Client().ImageSave(context.Background(), opts.images)
+	responseBody, err := dockerCli.Client().ImageSave(context.Background(), opts.images, opts.exclude)
 	if err != nil {
 		return err
 	}

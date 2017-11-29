@@ -233,7 +233,7 @@ func (s *imageRouter) getImagesGet(ctx context.Context, w http.ResponseWriter, r
 		names = r.Form["names"]
 	}
 
-	if err := s.backend.ExportImage(names, output); err != nil {
+	if err := s.backend.ExportImage(names, output, r.Form["exclude"]); err != nil {
 		if !output.Flushed() {
 			return err
 		}
@@ -247,12 +247,17 @@ func (s *imageRouter) postImagesLoad(ctx context.Context, w http.ResponseWriter,
 		return err
 	}
 	quiet := httputils.BoolValueOrDefault(r, "quiet", true)
+	printExcludes := httputils.BoolValue(r, "printExcludes")
+
+	if printExcludes {
+		quiet = true
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 
 	output := ioutils.NewWriteFlusher(w)
 	defer output.Close()
-	if err := s.backend.LoadImage(r.Body, output, quiet); err != nil {
+	if err := s.backend.LoadImage(r.Body, output, quiet, printExcludes); err != nil {
 		output.Write(streamformatter.FormatError(err))
 	}
 	return nil

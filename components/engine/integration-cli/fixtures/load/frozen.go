@@ -102,7 +102,7 @@ func loadFrozenImages(ctx context.Context, client client.APIClient) error {
 	tarCmd.Start()
 	defer tarCmd.Wait()
 
-	resp, err := client.ImageLoad(ctx, out, true)
+	resp, err := client.ImageLoad(ctx, out, true, false)
 	if err != nil {
 		return errors.Wrap(err, "failed to load frozen images")
 	}

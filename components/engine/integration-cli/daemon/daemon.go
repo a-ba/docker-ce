@@ -499,7 +499,7 @@ func (d *Daemon) LoadBusybox(t testingT) {
 	defer clientHost.Close()
 
 	ctx := context.Background()
-	reader, err := clientHost.ImageSave(ctx, []string{"busybox:latest"})
+	reader, err := clientHost.ImageSave(ctx, []string{"busybox:latest"}, []string{})
 	require.NoError(t, err, "failed to download busybox")
 	defer reader.Close()
 
@@ -507,7 +507,7 @@ func (d *Daemon) LoadBusybox(t testingT) {
 	require.NoError(t, err, "failed to create client")
 	defer client.Close()
 
-	resp, err := client.ImageLoad(ctx, reader, true)
+	resp, err := client.ImageLoad(ctx, reader, true, false)
 	require.NoError(t, err, "failed to load busybox")
 	defer resp.Body.Close()
 }

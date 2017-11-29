@@ -22,6 +22,162 @@ import (
 	digest "github.com/opencontainers/go-digest"
 )
 
+func (s *DockerSuite) TestSavePartialAndLoad(c *check.C) {
+
+	regTags := regexp.MustCompile(`(?s)"RepoTags": \[[^][]*\]`)
+	regParent := regexp.MustCompile(`(?s)"Parent": "[a-z0-9:]*"`)
+	inspectImage := func(img string) string {
+		result := icmd.RunCommand(dockerBinary, "inspect", img)
+		// image must exist
+		result.Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+		js := regTags.ReplaceAllLiteralString(result.Stdout(), `"RepoTags": []`)
+		js  = regParent.ReplaceAllLiteralString(js, `"Parent": ""`)
+		return js
+	}
+	makeImage := func(from string, tag string) string {
+		result := icmd.RunCommand("sh", "-c", fmt.Sprintf(
+				"(echo 'FROM %s' ; echo 'RUN echo %q >> /tags') | %v build -q -t %v -",
+				from, tag, dockerBinary, tag))
+		// build must not fail
+		result.Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+
+		// return image id
+		return strings.TrimSpace(result.Stdout())
+	}
+	regLayerID := regexp.MustCompile(`\Asha256:[0-9a-f]{64}\z`)
+	splitLines := func(txt string) []string {
+		return strings.Split(strings.Trim(txt, "\n"), "\n")
+	}
+	listImageLayers := func(img string) []string {
+		result := icmd.RunCommand("sh", "-c",
+			fmt.Sprintf("%v save --exclude=all %s | %v load --print-excludes",
+					dockerBinary, img, dockerBinary))
+		// list must not fail
+		result.Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+
+		layers := splitLines(result.Stdout())
+		for _, l := range layers {
+			if !regLayerID.MatchString(l) {
+				c.Fatalf("'--print-excludes' returned invalid layer id %q", l)
+			}
+		}
+		return layers
+	}
+
+	saveImage := func(tag string, filename string, exclude []string) {
+		exArgs := make([]string, len(exclude))
+		for i, ex := range exclude {
+			exArgs[i] = fmt.Sprintf("-e %s", ex)
+		}
+
+		saveCmdTemplate := `%v save -o %s %s %v`
+		saveCmdFinal := fmt.Sprintf(saveCmdTemplate, dockerBinary, filename,
+			strings.Join(exArgs, " "), tag)
+		icmd.RunCommand("bash", "-c", saveCmdFinal).Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+	}
+	tagImage := func(img string, tag string) {
+		tagCmdTemplate := `%v tag %s %s`
+		tagCmdFinal := fmt.Sprintf(tagCmdTemplate, dockerBinary, img, tag)
+		icmd.RunCommand("bash", "-c", tagCmdFinal).Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+	}
+	loadImage := func(filename string, must_succeed bool) {
+		loadCmdTemplate := `%s load -i %s`
+		loadCmdFinal := fmt.Sprintf(loadCmdTemplate, dockerBinary, filename)
+		loadCmd := exec.Command("bash", "-c", loadCmdFinal)
+		out, _, err := runCommandWithOutput(loadCmd)
+		if must_succeed && (err != nil) {
+			c.Fatalf("failed to load image: %v %v", out, err)
+		} else if !must_succeed && (err == nil) {
+			c.Fatalf("image load must fail")
+		}
+	}
+	loadImageTestExcludes := func(filename string, expect_excludes []string) {
+		result := icmd.RunCommand(dockerBinary, "load", "--print-excludes", "-i", filename)
+		result.Assert(c, icmd.Expected{
+			ExitCode: 0,
+		})
+		excludes := splitLines(result.Stdout())
+		ref      := expect_excludes
+		sort.Strings(excludes)
+		sort.Strings(ref)
+		if !reflect.DeepEqual(excludes, ref) {
+			c.Fatalf("load image produced invalid exclude id:\n\texpected: %v\n\tgot:      %v",
+				ref, excludes)
+		}
+	}
+	testImage := func(img string, inspectBefore string) {
+		inspectAfter := inspectImage(img)
+		if inspectBefore != inspectAfter {
+			c.Fatalf("inspect is not the same after a save / load")
+		}
+	}
+
+	repoName := "foobar-save-partial-load-test"
+	tagFoo  := repoName + ":foo"
+	tagBar  := repoName + ":bar"
+	tagBusy := "busybox:latest"
+
+	fileFooBar := "/tmp/" + repoName + "-foo-bar.tar"
+	fileBar := "/tmp/" + repoName + "-bar.tar"
+
+	idFoo := makeImage(tagBusy, tagFoo)
+	idBar := makeImage(tagFoo,  tagBar)
+
+	inspectFoo := inspectImage(tagFoo)
+	inspectBar := inspectImage(tagBar)
+
+	layersBusy := listImageLayers(tagBusy)
+	layersFoo  := listImageLayers(tagFoo)
+	layersBar  := listImageLayers(tagBar)
+
+	saveImage((tagFoo + " " + tagBar), fileFooBar, layersBusy)
+	saveImage(tagBar, fileBar,    layersFoo)
+
+	// load foo + bar
+	deleteImages(tagBar)
+	// FIXME layers seem to be lazily removed
+	//loadImageTestExcludes(fileFooBar, layersFoo)
+	deleteImages(tagFoo)
+	// FIXME layers seem to be lazily removed
+	//loadImageTestExcludes(fileFooBar, layersBusy)
+
+	loadImage(fileFooBar, true)
+	testImage(idFoo, inspectFoo)
+	testImage(idBar, inspectBar)
+
+	loadImageTestExcludes(fileFooBar, layersBar)
+
+	// load bar only
+	tagImage(idFoo, tagFoo)
+	deleteImages(idBar)
+	// FIXME layers seem to be lazily removed
+	//loadImageTestExcludes(fileFooBar, layersFoo)
+	loadImage(fileBar, true)
+	testImage(idBar, inspectBar)
+	loadImageTestExcludes(fileFooBar, layersBar)
+
+	// load bar but with foo missing
+	deleteImages(tagFoo)
+	deleteImages(tagBar)
+	// FIXME layers seem to be lazily removed
+	//loadImageTestExcludes(fileFooBar, layersBusy)
+	//loadImage(fileBar, false)
+
+	// cleanup
+	os.Remove(fileFooBar)
+	os.Remove(fileBar)
+}
+
 // save a repo using gz compression and try to load it using stdout
 func (s *DockerSuite) TestSaveXzAndLoadRepoStdout(c *check.C) {
 	testRequires(c, DaemonIsLinux)

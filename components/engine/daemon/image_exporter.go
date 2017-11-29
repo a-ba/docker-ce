@@ -13,25 +13,25 @@ import (
 // stream. All images with the given tag and all versions containing
 // the same tag are exported. names is the set of tags to export, and
 // outStream is the writer which the images are written to.
-func (daemon *Daemon) ExportImage(names []string, outStream io.Writer) error {
+func (daemon *Daemon) ExportImage(names []string, outStream io.Writer, exclude []string) error {
 	// TODO @jhowardmsft LCOW. This will need revisiting later.
 	platform := runtime.GOOS
 	if system.LCOWSupported() {
 		platform = "linux"
 	}
 	imageExporter := tarexport.NewTarExporter(daemon.stores[platform].imageStore, daemon.stores[platform].layerStore, daemon.referenceStore, daemon)
-	return imageExporter.Save(names, outStream)
+	return imageExporter.Save(names, outStream, exclude)
 }
 
 // LoadImage uploads a set of images into the repository. This is the
 // complement of ImageExport.  The input stream is an uncompressed tar
 // ball containing images and metadata.
-func (daemon *Daemon) LoadImage(inTar io.ReadCloser, outStream io.Writer, quiet bool) error {
+func (daemon *Daemon) LoadImage(inTar io.ReadCloser, outStream io.Writer, quiet bool, printExcludes bool) error {
 	// TODO @jhowardmsft LCOW. This will need revisiting later.
 	platform := runtime.GOOS
 	if system.LCOWSupported() {
 		platform = "linux"
 	}
 	imageExporter := tarexport.NewTarExporter(daemon.stores[platform].imageStore, daemon.stores[platform].layerStore, daemon.referenceStore, daemon)
-	return imageExporter.Load(inTar, outStream, quiet)
+	return imageExporter.Load(inTar, outStream, quiet, printExcludes)
 }
